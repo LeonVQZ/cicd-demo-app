@@ -1,0 +1,5 @@
+# Require explicit review for CI/CD and deployment-sensitive files
+.github/workflows/* @LeonVQZ
+Dockerfile @LeonVQZ
+requirements.txt @LeonVQZ
+CODEOWNERS @LeonVQZ
