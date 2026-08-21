@@ -1,4 +1,4 @@
-name: CI/CD + SLSA Build Provenance + SBOM/VEX
+name: CI/CD + SLSA Build Provenance + SBOM/VEX + Security Controls
 
 on:
   push:
@@ -7,9 +7,14 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -28,6 +33,8 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -47,6 +54,8 @@ jobs:
   dependency-scan:
     runs-on: ubuntu-latest
     needs: [lint, test]
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -78,9 +87,41 @@ jobs:
           path: pip-audit-report.json
           if-no-files-found: ignore
 
+  secret-scan:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sast:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: p/python
+
   build-and-push:
     runs-on: ubuntu-latest
-    needs: [dependency-scan]
+    needs: [dependency-scan, secret-scan, sast]
+    permissions:
+      contents: read
+      packages: write
     outputs:
       image_digest: ${{ steps.build.outputs.digest }}
       image_ref: ${{ steps.meta.outputs.tags }}
@@ -146,7 +187,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-and-push]
     permissions:
-      contents: write
+      contents: read
       actions: read
     steps:
       - name: Log in to DockerHub
@@ -161,3 +202,40 @@ jobs:
           image: ${{ vars.DOCKERHUB_USERNAME }}/cicd-demo-app@${{ needs.build-and-push.outputs.image_digest }}
           format: spdx-json
           artifact-name: cicd-demo-app.spdx.json
+
+  verify-provenance:
+    runs-on: ubuntu-latest
+    needs: [build-and-push, provenance]
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+    steps:
+      - name: Log in to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.8.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Download attestation
+        run: |
+          cosign download attestation \
+            ${{ vars.DOCKERHUB_USERNAME }}/cicd-demo-app@${{ needs.build-and-push.outputs.image_digest }} \
+            > attestation.json
+
+      - name: Verify provenance
+        run: |
+          git clone https://github.com/slsa-framework/slsa-verifier.git
+          cd slsa-verifier
+          git checkout v2.7.1
+          go run ./cli/slsa-verifier verify-image \
+            --source-uri github.com/${{ github.repository }} \
+            --provenance-path ../attestation.json \
+            ${{ vars.DOCKERHUB_USERNAME }}/cicd-demo-app@${{ needs.build-and-push.outputs.image_digest }}
