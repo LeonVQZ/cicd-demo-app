@@ -1,0 +1,22 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://openvex.dev/docs/public/vex-cc6a0ffeebfc65058631f248f3541af285325717d46310170b8c94f49bd65fce",
+  "author": "Unknown Author",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2019-11324"
+      },
+      "products": [
+        {
+          "@id": "pkg:pypi/urllib3@1.24.1"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-21T00:59:06.148384Z"
+    }
+  ],
+  "timestamp": "2026-08-21T00:59:06Z"
+}
